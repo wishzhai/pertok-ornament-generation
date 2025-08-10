@@ -1,0 +1,24 @@
+# Deep Learning Framework
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# Music Processing
+miditok>=2.1.7
+symusic>=0.3.0
+
+# Data Processing
+pandas>=1.5.0
+numpy>=1.21.0
+
+# Visualization
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Progress Tracking
+tqdm>=4.64.0
+
+# Utilities
+pathlib
+argparse
+typing-extensions
