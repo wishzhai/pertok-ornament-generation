@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ornament Generation Demo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20250823-1">
+    <!-- OpenSheetMusicDisplay -->
+    <script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.8.5/build/opensheetmusicdisplay.min.js"></script>
+    <!-- HTML MIDI Player -->
+    <script src="https://cdn.jsdelivr.net/combine/npm/tone@14.7.58,npm/@magenta/music@1.23.1/es6/core.js,npm/focus-visible@5,npm/html-midi-player@1.5.0"></script>
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row">
+            <div class="col-12 text-center mb-4">
+                <h1>Ornament Generation Demo</h1>
+                <p class="lead">Upload a MIDI file, generate a new version with ornaments, and visualize as sheet music</p>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6 offset-md-3">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Upload MIDI File</h5>
+                        <form id="upload-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="midi-file" class="form-label">Select MIDI File</label>
+                                <input class="form-control" type="file" id="midi-file" accept=".mid,.midi">
+                            </div>
+                            <div class="mb-3">
+                                <label for="temperature" class="form-label">Temperature (0.1-2.0)</label>
+                                <input type="range" class="form-range" id="temperature" min="0.1" max="2.0" step="0.1" value="1.0">
+                                <div class="d-flex justify-content-between">
+                                    <small>More Deterministic (0.1)</small>
+                                    <small id="temp-value">1.0</small>
+                                    <small>More Creative (2.0)</small>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="top-k" class="form-label">Top-K (1-100)</label>
+                                <input type="range" class="form-range" id="top-k" min="1" max="100" step="1" value="50">
+                                <div class="d-flex justify-content-between">
+                                    <small>More Focused (1)</small>
+                                    <small id="top-k-value">50</small>
+                                    <small>More Diverse (100)</small>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="top-p" class="form-label">Top-P (0.1-1.0)</label>
+                                <input type="range" class="form-range" id="top-p" min="0.1" max="1.0" step="0.1" value="0.9">
+                                <div class="d-flex justify-content-between">
+                                    <small>More Focused (0.1)</small>
+                                    <small id="top-p-value">0.9</small>
+                                    <small>More Diverse (1.0)</small>
+                                </div>
+                            </div>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary" id="generate-btn">Generate Ornaments</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4" id="results-section" style="display: none;">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Generation Results</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card mb-3">
+                                    <div class="card-header">Original MIDI</div>
+                                    <div class="card-body">
+                                        <div class="text-center mb-3">
+                                            <div id="input-score" style="height: 400px; overflow-y: auto;"></div>
+                                        </div>
+                                        <div class="d-grid">
+                                            <midi-player id="input-player" sound-font visualizer="#input-score"></midi-player>
+                                            <a id="input-download" class="btn btn-sm btn-outline-secondary mt-2" download>Download Original MIDI</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card mb-3">
+                                    <div class="card-header">MIDI with Ornaments</div>
+                                    <div class="card-body">
+                                        <div class="text-center mb-3">
+                                            <div id="output-score" style="height: 400px; overflow-y: auto;"></div>
+                                        </div>
+                                        <div class="d-grid">
+                                            <midi-player id="output-player" sound-font visualizer="#output-score"></midi-player>
+                                            <a id="output-download" class="btn btn-sm btn-outline-secondary mt-2" download>Download Ornamented MIDI</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <div class="card">
+                                    <div class="card-header">Ornament Analysis</div>
+                                    <div class="card-body">
+                                        <div id="analysis-content"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="alert alert-info" role="alert">
+                    <h5>About Ornament Generation</h5>
+                    <p>This demo uses a PerTok-based Transformer model trained with a specific ornament-aware loss function, capable of adding natural, stylistically appropriate ornaments to MIDI files.</p>
+                    <p>Model Features:</p>
+                    <ul>
+                        <li>PerTok tokenization supporting microtiming representation</li>
+                        <li>Domain-specific Transformer architecture</li>
+                        <li>Ornament-aware loss function</li>
+                        <li>Trained on 530 classical pieces from the MAESTRO dataset</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer mt-5 py-3 bg-light">
+        <div class="container text-center">
+            <span class="text-muted">Ornament Generation Demo | Based on PerTok and Domain-Specific Transformer Design</span>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}?v=20250823-1"></script>
+</body>
+</html>

@@ -55,6 +55,9 @@ class OrnamentInferenceEngine:
 
         # 预计算token类型集合（用于语法约束与sanitizer）
         self._build_token_sets()
+
+        # 初始化装饰音分析器
+        self.ornament_loss = create_ornament_aware_loss(self.tokenizer)
     
     def _load_model(self, model_path: str) -> torch.nn.Module:
         """加载训练好的模型"""
@@ -232,7 +235,15 @@ class OrnamentInferenceEngine:
             return None
     
     def decode_to_midi(self, tokens, output_path: str):
-        """解码tokens为MIDI文件（优先使用PerTok内部解码）"""
+        """解码tokens为MIDI文件（优先使用PerTok内部解码）
+        
+        Args:
+            tokens: token序列
+            output_path: 输出MIDI文件路径
+            
+        Returns:
+            bool: 解码是否成功
+        """
         try:
             print(f"🎼 解码为MIDI: {output_path}")
             print(f"   解码tokens数量: {len(tokens)}")
@@ -290,6 +301,7 @@ class OrnamentInferenceEngine:
     # ---------------- internal helpers ----------------
     def _build_token_sets(self):
         vocab = self.tokenizer.vocab
+        id_to_str = {v: k for k, v in vocab.items()}
         self._ids_pitch = {i for s, i in vocab.items() if s.startswith('Pitch_')}
         self._ids_velocity = {i for s, i in vocab.items() if s.startswith('Velocity_')}
         self._ids_duration = {i for s, i in vocab.items() if s.startswith('Duration_')}
@@ -297,6 +309,31 @@ class OrnamentInferenceEngine:
         self._ids_micro = {i for s, i in vocab.items() if s.startswith('MicroTiming_')}
         self._ids_timesig = {i for s, i in vocab.items() if s.startswith('TimeSig_')}
         self._ids_special = {i for s, i in vocab.items() if s.endswith('_None')}
+
+        # 进一步细分 TimeShift：短/中/长（用于采样偏置）
+        def _parse_beats_from_token(token_str: str) -> float:
+            # 兼容 PerTok 的 1.0.320 / 0.160.320 / 1.0 格式
+            try:
+                if '_' in token_str:
+                    token_str = token_str.split('_', 1)[1]
+                parts = token_str.split('.')
+                if len(parts) >= 2:
+                    return float(f"{parts[0]}.{parts[1]}")
+                return float(token_str)
+            except Exception:
+                return 0.0
+
+        self._ids_timeshift_short = set()
+        self._ids_timeshift_medium = set()
+        self._ids_timeshift_long = set()
+        for tok_id in self._ids_timeshift:
+            beats = _parse_beats_from_token(id_to_str.get(tok_id, ''))
+            if beats < 0.25:
+                self._ids_timeshift_short.add(tok_id)
+            elif beats < 1.0:
+                self._ids_timeshift_medium.add(tok_id)
+            else:
+                self._ids_timeshift_long.add(tok_id)
         # 允许的token集合（解码严格）
         self._ids_allowed = set().union(
             self._ids_pitch,
@@ -309,6 +346,268 @@ class OrnamentInferenceEngine:
         )
         # 常用TimeSig优先ID
         self._id_timesig_44 = next((i for s, i in vocab.items() if s == 'TimeSig_4/4'), None)
+        
+    def analyze_ornaments(self, input_tokens, output_tokens):
+        """分析装饰音生成结果
+        
+        Args:
+            input_tokens: 原始输入token序列
+            output_tokens: 生成的带装饰音token序列
+            
+        Returns:
+            dict: 装饰音分析结果
+        """
+        try:
+            # 初始化分析结果
+            analysis = {
+                'original_notes': 0,
+                'ornament_notes': 0,
+                'ornament_density': 0.0,
+                'microtiming_adjustments': 0,
+                'ornament_types': {}
+            }
+            
+            # 使用ornament_content分析替代decode_to_events
+            input_analysis = self.analyze_ornament_content(input_tokens)
+            output_analysis = self.analyze_ornament_content(output_tokens)
+            
+            # 计算原始音符数量（估计值）
+            pitch_tokens = sum(1 for t in input_tokens if t in self._ids_pitch)
+            analysis['original_notes'] = pitch_tokens
+            
+            # 计算装饰音数量（估计值）
+            analysis['ornament_notes'] = output_analysis.get('ornament_tokens', 0)
+            
+            # 装饰音密度
+            if pitch_tokens > 0:
+                analysis['ornament_density'] = analysis['ornament_notes'] / pitch_tokens
+            
+            # 装饰音类型统计
+            analysis['ornament_types'] = output_analysis.get('ornament_categories', {
+                '短音符': 0,
+                '高力度': 0,
+                '微时序调整': 0,
+                '装饰性音高': 0
+            })
+            
+            # 微时序调整
+            analysis['microtiming_adjustments'] = analysis['ornament_types'].get('微时序调整', 0)
+            
+            return analysis
+            
+        except Exception as e:
+            print(f"装饰音分析失败: {e}")
+            return {}
+            
+    def midi_to_score(self, midi_path, output_path, highlight_ornaments=False, reference_midi=None):
+        """Convert MIDI file to MusicXML format for OpenSheetMusicDisplay
+        
+        Args:
+            midi_path: Path to MIDI file
+            output_path: Path for output MusicXML file (should end with .xml)
+            highlight_ornaments: Whether to highlight ornaments with colors
+            reference_midi: Reference MIDI file path (for comparing to identify ornaments)
+            
+        Returns:
+            bool: Whether conversion was successful
+        """
+        try:
+            import music21
+            from music21 import stream, note, pitch, duration, meter, tempo, key, clef
+            
+            # Load MIDI file using music21
+            score = music21.converter.parse(midi_path)
+            
+            # Get reference notes if highlighting ornaments
+            ref_notes = set()
+            if highlight_ornaments and reference_midi:
+                try:
+                    ref_score = music21.converter.parse(reference_midi)
+                    for part in ref_score.parts:
+                        for element in part.flat.notes:
+                            if hasattr(element, 'pitch'):
+                                # Use pitch and quantized offset as key
+                                offset = round(element.offset * 4) / 4  # Quantize to 16th notes
+                                ref_notes.add((element.pitch.midi, offset))
+                            elif hasattr(element, 'pitches'):  # Chord
+                                offset = round(element.offset * 4) / 4
+                                for p in element.pitches:
+                                    ref_notes.add((p.midi, offset))
+                except Exception as e:
+                    print(f"Failed to load reference MIDI: {e}")
+            
+            # Create a new score with proper formatting
+            new_score = stream.Score()
+            
+            # Add metadata
+            new_score.metadata = music21.metadata.Metadata()
+            new_score.metadata.title = 'Ornament Generation Result'
+            new_score.metadata.composer = 'AI Generated'
+            
+            # Create a single part to merge all voices
+            new_part = stream.Part()
+            new_part.partName = 'Piano'
+            new_part.partAbbreviation = 'Pno'
+            
+            # Add clef, key signature, time signature, and tempo
+            new_part.insert(0, clef.TrebleClef())
+            new_part.insert(0, key.KeySignature(0))  # C major
+            new_part.insert(0, meter.TimeSignature('4/4'))
+            new_part.insert(0, tempo.TempoIndication(number=120))
+            
+            # Collect all notes from all parts by offset
+            # (旧实现按起始 offset 合并，可能导致跨时值重叠，从而在导出时产生隐式多声部，休止符会被 OSMD/engraver 推到五线谱外侧)
+            # 改为：基于事件时间片（time-slicing）的方式构建单声部：
+            # 1) 收集所有音的起止时间
+            # 2) 生成全局断点序列（起点与终点）并量化
+            # 3) 在每个相邻断点区间内，写入当前“正在发声”的音集合（无则写休止符）
+            
+            # 收集所有 note 事件（包含单音和和弦的每个音）
+            events = []  # (pitch_obj, start, end, velocity)
+            for part_idx, part in enumerate(score.parts):
+                for element in part.flat.notes:
+                    vel = getattr(element.volume, 'velocity', 64)
+                    if hasattr(element, 'pitch'):
+                        events.append((element.pitch, float(element.offset), float(element.offset + element.quarterLength), vel))
+                    elif hasattr(element, 'pitches'):
+                        for p in element.pitches:
+                            events.append((p, float(element.offset), float(element.offset + element.quarterLength), vel))
+            
+            if not events:
+                # 没有音符则直接写一个全休止的小节，避免后续报错
+                r = note.Rest(quarterLength=4.0)
+                try:
+                    # 让休止符居中显示（treble 中心线 B4）
+                    r.staffPosition = 0
+                except Exception:
+                    pass
+                new_part.insert(0.0, r)
+            else:
+                # 生成断点（所有开始与结束），并进行轻量量化以避免浮点抖动
+                quantize_div = 16  # 1/16音符粒度
+                def q(x: float) -> float:
+                    return round(x * quantize_div) / quantize_div
+                
+                breakpoints = set()
+                for _, s, e, _ in events:
+                    breakpoints.add(q(s))
+                    breakpoints.add(q(e))
+                # 确保包含 0 起点
+                breakpoints.add(0.0)
+                points = sorted([p for p in breakpoints])
+                
+                # 为快速查询，按起点排序
+                events.sort(key=lambda it: it[1])
+                
+                # 逐区间写入内容
+                for i in range(len(points) - 1):
+                    start = points[i]
+                    end = points[i + 1]
+                    if end <= start:
+                        continue
+                    duration = end - start
+                    
+                    # 找到在该区间内处于发声状态的音（start ∈ [s, e)）
+                    active_pitches = []
+                    avg_velocity = 0
+                    cnt = 0
+                    for p_obj, s, e, v in events:
+                        # 允许极小的浮点误差
+                        if s - 1e-6 <= start < e - 1e-6:
+                            active_pitches.append(p_obj)
+                            avg_velocity += v
+                            cnt += 1
+                    if cnt > 0:
+                        avg_velocity = int(avg_velocity / cnt)
+                    else:
+                        avg_velocity = 64
+                    
+                    if len(active_pitches) == 0:
+                        # 空区间 -> 写入休止符（显式），避免自动补齐产生的多声部与漂移
+                        r = note.Rest(quarterLength=duration)
+                        try:
+                            r.staffPosition = 0  # 尽量居中
+                        except Exception:
+                            pass
+                        r.offset = start
+                        new_part.insert(start, r)
+                    elif len(active_pitches) == 1:
+                        # 单音
+                        p = active_pitches[0]
+                        new_element = note.Note(p, quarterLength=duration)
+                        new_element.offset = start
+                        new_element.volume.velocity = avg_velocity
+                        
+                        if highlight_ornaments:
+                            # 使用更宽松的匹配：检查该音高是否在参考音符中存在（忽略精确时间匹配）
+                            is_ornament = not any(ref_pitch == p.midi for ref_pitch, _ in ref_notes)
+                            new_element.style.color = '#000000'  # 所有音符都使用黑色
+                            new_element.addLyric(f'{p.name}{p.octave}')
+                        else:
+                            new_element.addLyric(f'{p.name}{p.octave}')
+                        new_part.insert(start, new_element)
+                    else:
+                        # 和弦（多个音同时在该区间发声）
+                        # 去重以免相同音重复
+                        unique_pitches = []
+                        seen = set()
+                        for p in active_pitches:
+                            if p.midi not in seen:
+                                seen.add(p.midi)
+                                unique_pitches.append(p)
+                        new_element = music21.chord.Chord(unique_pitches, quarterLength=duration)
+                        new_element.offset = start
+                        new_element.volume.velocity = avg_velocity
+                        
+                        if highlight_ornaments:
+                            # 使用更宽松的匹配：若和弦中任一音高在参考音符中存在，则视为非装饰音
+                            has_ref = any(any(ref_pitch == p.midi for ref_pitch, _ in ref_notes) for p in unique_pitches)
+                            new_element.style.color = '#000000'  # 所有音符都使用黑色
+                        new_part.insert(start, new_element)
+            
+            new_score.insert(0, new_part)
+            
+            # Ensure output directory exists
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            # Write MusicXML file
+            new_score.write('musicxml', fp=output_path)
+            
+            print(f"Successfully converted MIDI to MusicXML: {output_path}")
+            return True
+            
+        except Exception as e:
+            print(f"Error converting MIDI to MusicXML: {e}")
+            # Create a fallback empty MusicXML
+            try:
+                fallback_xml = '''<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <movement-title>Error Loading MIDI</movement-title>
+  <part-list>
+    <score-part id="P1">
+      <part-name>Error</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <note><rest/><duration>4</duration><type>whole</type></note>
+    </measure>
+  </part>
+</score-partwise>'''
+                
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.write(fallback_xml)
+                return False
+            except Exception as fallback_error:
+                print(f"Failed to create fallback MusicXML: {fallback_error}")
+                return False
 
     def _last_non_control(self, seq):
         for t in reversed(seq):
@@ -324,14 +623,17 @@ class OrnamentInferenceEngine:
 
             # 通用：降低连续 TimeShift/MicroTiming 概率
             if len(seq) >= 1 and (seq[-1] in self._ids_timeshift or seq[-1] in self._ids_micro):
-                bias[list(self._ids_timeshift)] -= 1.0
-                bias[list(self._ids_micro)] -= 0.5
+                bias[list(self._ids_timeshift)] -= 0.4
+                bias[list(self._ids_micro)] -= 0.2
 
             # 若上一个非控制不是 Pitch，则更希望下一步是 Pitch
             if last_tok is None or last_tok not in self._ids_pitch:
                 bias[list(self._ids_pitch)] += 0.9
                 # 同时抑制继续TimeShift
-                bias[list(self._ids_timeshift)] -= 0.7
+                bias[list(self._ids_timeshift)] -= 0.3
+                # 鼓励短TimeShift以减少长停顿
+                if hasattr(self, '_ids_timeshift_short'):
+                    bias[list(self._ids_timeshift_short)] += 0.2
             else:
                 # 上一个是 Pitch：下一步鼓励 Velocity 或 Duration（优先给出时值/力度）
                 bias[list(self._ids_velocity)] += 0.5
@@ -339,6 +641,12 @@ class OrnamentInferenceEngine:
 
             # 软约束：控制类token整体轻度降权
             bias[list(self._ids_micro)] -= 0.2
+
+            # 全局：惩罚长TimeShift，鼓励短TimeShift
+            if hasattr(self, '_ids_timeshift_long'):
+                bias[list(self._ids_timeshift_long)] -= 0.6
+            if hasattr(self, '_ids_timeshift_short'):
+                bias[list(self._ids_timeshift_short)] += 0.4
 
             return logits + bias
 
@@ -448,6 +756,46 @@ class OrnamentInferenceEngine:
             cleaned.append(eos)
 
         return cleaned
+    def decode_to_midi(self, tokens, output_path):
+        """将token序列解码为MIDI文件并保存
+        
+        Args:
+            tokens: token序列
+            output_path: 输出MIDI文件路径
+            
+        Returns:
+            bool: 解码是否成功
+        """
+        try:
+            print(f"🎼 解码token序列为MIDI: {len(tokens)}个tokens")
+            
+            # 使用FixedPerTokDecoder解码
+            score = self.decoder.decode_tokens(tokens)
+            if score is None:
+                print("❌ 解码失败")
+                return False
+                
+            # 获取音符数量
+            total_notes = sum(len(t.notes) for t in getattr(score, 'tracks', []))
+            print(f"  ✅ PerTok架构解码完成: {total_notes}个音符")
+            
+            # 保存MIDI文件
+            success = self.decoder.save_to_midi(score, output_path)
+            if success:
+                file_size = os.path.getsize(output_path)
+                print(f"✅ MIDI保存成功: ")
+                print(f"   文件: {output_path} ({file_size} bytes)")
+                print(f"   轨道数: {len(getattr(score, 'tracks', []))}")
+                print(f"   音符数: {total_notes}")
+                return True
+            else:
+                print("❌ MIDI保存失败")
+                return False
+                
+        except Exception as e:
+            print(f"❌ MIDI解码失败: {e}")
+            return False
+            
     def analyze_ornament_content(self, tokens):
         """分析token序列中的装饰音内容"""
         try:

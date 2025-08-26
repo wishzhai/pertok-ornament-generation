@@ -342,36 +342,58 @@ class FixedPerTokDecoder:
             if token_str.startswith('Pitch_'):
                 pitch = self._extract_int(token_str, prefix='Pitch_')
                 if pitch is not None:
-                    # 寻找对应的Duration token（PerTok架构要求）
+                    # 默认参数
                     duration_ticks = self.tpq // 4  # 默认四分音符
-                    
-                    # 向前查找Duration token（PerTok通常在Pitch后紧跟Duration）
-                    for j in range(i + 1, min(i + 5, len(cleaned))):
+                    note_velocity = current_velocity
+                    note_micro_shift = pending_micro_shift_ticks
+
+                    # 查找随后的 Velocity / MicroTiming / Duration（消费它们，避免二次推进时间）
+                    consumed_until = i
+                    look_end = min(i + 8, len(cleaned))
+                    for j in range(i + 1, look_end):
                         next_token_str = self.vocab_reverse.get(cleaned[j], '')
+                        if next_token_str.startswith('Velocity_') and note_velocity == current_velocity:
+                            v = self._extract_int(next_token_str, prefix='Velocity_')
+                            if v is not None:
+                                note_velocity = max(1, min(int(v), 127))
+                            consumed_until = max(consumed_until, j)
+                            continue
+                        if next_token_str.startswith('MicroTiming_') and note_micro_shift == pending_micro_shift_ticks:
+                            bin_val = self._extract_int(next_token_str, prefix='MicroTiming_')
+                            if bin_val is not None and self.num_micro_bins > 0 and self.max_micro_shift_beats > 0:
+                                max_bin = self.num_micro_bins - 1
+                                ratio = max(-1.0, min(1.0, (bin_val - max_bin/2) / (max_bin/2)))
+                                shift_beats = ratio * self.max_micro_shift_beats
+                                note_micro_shift = int(shift_beats * self.tpq)
+                            consumed_until = max(consumed_until, j)
+                            continue
                         if next_token_str.startswith('Duration_'):
-                            # PerTok格式: Duration_<beats>.<ticks>.<tpq>
                             duration_value = self._extract_pertok_time(next_token_str, 'Duration_')
                             if duration_value is not None:
                                 duration_ticks = max(1, int(duration_value * self.tpq))
+                            consumed_until = max(consumed_until, j)
                             break
-                        elif next_token_str.startswith('Pitch_'):
+                        if next_token_str.startswith('Pitch_'):
                             # 下一个Pitch，停止查找
                             break
-                    
+
                     # 创建音符（PerTok架构的核心）
-                    start_ticks = current_time_ticks + pending_micro_shift_ticks
+                    start_ticks = current_time_ticks + note_micro_shift
                     note = Note(
                         time=max(0, start_ticks),
                         duration=duration_ticks,
                         pitch=int(pitch),
-                        velocity=current_velocity
+                        velocity=note_velocity
                     )
                     notes.append(note)
-                    
-                    # PerTok架构：音符后时间前进
-                    current_time_ticks += duration_ticks
-                    pending_micro_shift_ticks = 0  # 重置微时间偏移
-                    
+
+                    # 按PerTok语义：时间推进仅由后续的TimeShift决定，Duration只决定音符长度
+                    pending_micro_shift_ticks = 0
+
+                    # 跳过我们已消费的 Velocity/MicroTiming/Duration（保留TimeShift由主循环处理）
+                    i = consumed_until + 1
+                    continue
+                # pitch 解析失败则继续
                 i += 1
                 continue
             

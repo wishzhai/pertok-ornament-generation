@@ -1,0 +1,302 @@
+/* Interactive Music Editor Styles */
+
+.music-editor-container {
+    min-height: 400px;
+    background-color: #fafafa;
+    border: 2px dashed #dee2e6;
+    border-radius: 8px;
+    position: relative;
+    overflow-x: auto;
+    overflow-y: hidden;
+    cursor: crosshair;
+}
+
+.music-editor-container.has-content {
+    border: 2px solid #28a745;
+    background-color: #ffffff;
+    cursor: default;
+}
+
+.music-editor-container.delete-mode {
+    cursor: not-allowed;
+}
+
+.music-editor-container.delete-mode .vf-stavenote {
+    cursor: pointer;
+}
+
+.music-editor-container svg {
+    display: block;
+    margin: 0 auto;
+}
+
+/* Staff interaction hints */
+.staff-line-hover {
+    stroke: #007bff !important;
+    stroke-width: 2 !important;
+    opacity: 0.7;
+}
+
+/* Note preview */
+.note-preview {
+    opacity: 0.5;
+    fill: #007bff !important;
+}
+
+/* Selected notes */
+.note-selected {
+    fill: #dc3545 !important;
+    stroke: #dc3545 !important;
+    stroke-width: 2 !important;
+}
+
+/* Ornament notes (for results) */
+.ornament-note {
+    fill: #000000 !important;
+    stroke: #000000 !important;
+}
+
+/* Score containers */
+.score-container {
+    min-height: 300px;
+    background-color: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 15px;
+    overflow-x: auto;
+    overflow-y: auto;
+}
+
+.score-container svg {
+    display: block;
+    margin: 0 auto;
+}
+
+/* Toolbar enhancements */
+.card-body.py-2 {
+    padding-top: 0.75rem !important;
+    padding-bottom: 0.75rem !important;
+}
+
+.form-label.mb-1 {
+    margin-bottom: 0.25rem !important;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: #495057;
+}
+
+.form-select-sm {
+    font-size: 0.875rem;
+}
+
+.btn-group-sm .btn {
+    font-size: 0.875rem;
+}
+
+/* Loading states */
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.loading-spinner {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Empty state */
+.empty-state {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: #6c757d;
+    pointer-events: none;
+}
+
+.empty-state i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.empty-state h5 {
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+
+.empty-state p {
+    margin-bottom: 0;
+    font-size: 0.875rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .music-editor-container {
+        min-height: 300px;
+    }
+    
+    .score-container {
+        min-height: 250px;
+    }
+    
+    .btn-group-sm .btn {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+    }
+    
+    .form-select-sm {
+        font-size: 0.75rem;
+    }
+}
+
+/* Animation for note addition */
+@keyframes noteAdded {
+    0% {
+        transform: scale(0.8);
+        opacity: 0.5;
+    }
+    50% {
+        transform: scale(1.1);
+        opacity: 0.8;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.note-added {
+    animation: noteAdded 0.3s ease-out;
+}
+
+/* Animation for note removal */
+@keyframes noteRemoved {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(0.8);
+        opacity: 0;
+    }
+}
+
+.note-removed {
+    animation: noteRemoved 0.2s ease-in;
+}
+
+/* Hover effects */
+.btn:hover {
+    transform: translateY(-1px);
+    transition: transform 0.2s ease;
+}
+
+.card {
+    transition: box-shadow 0.2s ease;
+}
+
+.card:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Custom range slider styling */
+.form-range::-webkit-slider-thumb {
+    background-color: #007bff;
+    border: 2px solid #ffffff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.form-range::-moz-range-thumb {
+    background-color: #007bff;
+    border: 2px solid #ffffff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Success and error states */
+.alert-success {
+    border-left: 4px solid #28a745;
+}
+
+.alert-danger {
+    border-left: 4px solid #dc3545;
+}
+
+.alert-info {
+    border-left: 4px solid #17a2b8;
+}
+
+.alert-warning {
+    border-left: 4px solid #ffc107;
+}
+
+/* MIDI player styling */
+midi-player {
+    display: block;
+    width: 100%;
+    margin: 10px 0;
+}
+
+/* Utility classes */
+.text-ornament {
+    color: #9C27B0 !important;
+    font-weight: 600;
+}
+
+.bg-ornament {
+    background-color: #9C27B0 !important;
+    color: white !important;
+}
+
+.border-ornament {
+    border-color: #9C27B0 !important;
+}
+
+/* Tooltip styling */
+.tooltip {
+    font-size: 0.875rem;
+}
+
+.tooltip-inner {
+    background-color: #333;
+    color: #fff;
+    border-radius: 4px;
+    padding: 8px 12px;
+}
+
+/* Focus states for accessibility */
+.btn:focus,
+.form-select:focus,
+.form-range:focus {
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* Print styles */
+@media print {
+    .card-header,
+    .btn,
+    .form-control,
+    .form-select,
+    .form-range {
+        display: none !important;
+    }
+    
+    .score-container {
+        border: none;
+        padding: 0;
+    }
+    
+    .music-editor-container {
+        border: none;
+        background: white;
+    }
+}
