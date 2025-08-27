@@ -149,7 +149,7 @@ def generate_ornaments():
     initial_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
     print(f"🔍 初始内存使用: {initial_memory:.1f}MB")
     
-    if initial_memory > 400:  # 如果初始内存已经很高，拒绝请求
+    if initial_memory > 480:  # 调整阈值，给更多空间
         return jsonify({'error': 'Server memory usage too high, please try again later'}), 503
     
     inference_engine = None
@@ -162,7 +162,7 @@ def generate_ornaments():
         model_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
         print(f"🔍 模型加载后内存: {model_memory:.1f}MB")
         
-        if model_memory > 450:  # 如果内存使用过高，提前退出
+        if model_memory > 500:  # 调整阈值，给模型加载更多空间
             return jsonify({'error': 'Memory usage too high after model loading'}), 503
         
         # Input and output paths
@@ -178,10 +178,10 @@ def generate_ornaments():
         # Generate ornaments with strict memory limits
         output_tokens = inference_engine.generate_ornaments(
             input_tokens, 
-            temperature=min(temperature, 0.8),  # 限制温度以减少计算
-            top_k=min(top_k, 20),  # 限制top_k以减少内存使用
-            top_p=min(top_p, 0.8),  # 限制top_p
-            max_new_tokens=30  # 严格限制生成长度
+            temperature=min(temperature, 0.7),  # 进一步限制温度
+            top_k=min(top_k, 10),  # 进一步限制top_k
+            top_p=min(top_p, 0.7),  # 进一步限制top_p
+            max_new_tokens=15  # 更严格限制生成长度
         )
         
         if output_tokens is None:
