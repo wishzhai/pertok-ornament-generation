@@ -51,12 +51,31 @@ def allowed_file(filename):
 
 
 def create_inference_engine():
-    """Create a temporary inference engine instance"""
+    """Create a temporary inference engine instance with memory optimization"""
     try:
-        return OrnamentInferenceEngine(model_path, device="auto")
+        # 强制使用CPU并启用内存优化
+        return OrnamentInferenceEngine(model_path, device="cpu")
     except Exception as e:
         print(f"Failed to create inference engine: {e}")
         return None
+
+def cleanup_inference_engine(engine):
+    """Clean up inference engine and free memory"""
+    if engine is not None:
+        # 清理模型
+        if hasattr(engine, 'model') and engine.model is not None:
+            del engine.model
+        # 清理其他组件
+        if hasattr(engine, 'tokenizer'):
+            del engine.tokenizer
+        if hasattr(engine, 'decoder'):
+            del engine.decoder
+        if hasattr(engine, 'ornament_loss'):
+            del engine.ornament_loss
+        del engine
+        # 强制垃圾回收
+        import gc
+        gc.collect()
 
 
 
@@ -117,11 +136,12 @@ def generate_ornaments():
         return jsonify({'error': 'No filename provided'}), 400
     
     # Create temporary inference engine
-    inference_engine = create_inference_engine()
-    if inference_engine is None:
-        return jsonify({'error': 'Failed to create inference engine'}), 500
-    
+    inference_engine = None
     try:
+        inference_engine = create_inference_engine()
+        if inference_engine is None:
+            return jsonify({'error': 'Failed to create inference engine'}), 500
+        
         # Input and output paths
         input_path = os.path.join(UPLOAD_FOLDER, filename)
         output_filename = f"ornament_{filename}"
@@ -178,12 +198,9 @@ def generate_ornaments():
     except Exception as e:
         return jsonify({'error': f'Processing failed: {str(e)}'}), 500
     finally:
-        # Explicitly delete inference engine to free memory
+        # Clean up memory using dedicated cleanup function
         if 'inference_engine' in locals():
-            del inference_engine
-            # Force garbage collection
-            import gc
-            gc.collect()
+            cleanup_inference_engine(inference_engine)
 
 
 

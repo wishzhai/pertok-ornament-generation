@@ -28,13 +28,10 @@ class OrnamentInferenceEngine:
             model_path: 训练好的模型路径
             device: 计算设备 ("auto", "cuda", "cpu")
         """
-        # 设备选择
-        if device == "auto":
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            self.device = torch.device(device)
+        # 强制使用CPU以节省内存
+        self.device = torch.device("cpu")
         
-        print(f"🚀 初始化装饰音生成引擎")
+        print(f"🚀 初始化装饰音生成引擎 (内存优化模式)")
         print(f"   设备: {self.device}")
         self.allow_fallback = allow_fallback
         
@@ -66,7 +63,7 @@ class OrnamentInferenceEngine:
             return None
         
         try:
-            print(f"🔄 加载模型: {model_path}")
+            print(f"🔄 加载模型: {model_path} (内存优化模式)")
             checkpoint = torch.load(model_path, map_location=self.device)
             
             # 重建模型架构
@@ -82,7 +79,14 @@ class OrnamentInferenceEngine:
             # 加载权重
             model.load_state_dict(checkpoint['model_state_dict'])
             model.to(self.device)
+            
+            # 使用半精度以节省内存
+            model = model.half()
             model.eval()
+            
+            # 清理checkpoint以释放内存
+            del checkpoint
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
             
             print(f"✅ 模型加载成功:")
             print(f"   词汇表大小: {vocab_size}")
@@ -153,6 +157,14 @@ class OrnamentInferenceEngine:
                     
                     # 模型前向推理
                     logits = self.model(input_tensor)  # [1, seq_len, vocab_size]
+                    
+                    # 立即清理输入tensor以节省内存
+                    del input_tensor
+                    
+                    # 每10步进行一次垃圾回收
+                    if step % 10 == 0:
+                        import gc
+                        gc.collect()
                     
                     # 获取最后一个位置的logits用于生成下一个token
                     next_token_logits = logits[0, -1, :]  # [vocab_size]
@@ -226,12 +238,21 @@ class OrnamentInferenceEngine:
                 # 生成后做一次sanitizer，提升PerTok解码成功率
                 sanitized = self._sanitize_tokens(generated_sequence)
                 print(f"   生成成功: {len(sanitized)} 个tokens (新增{len(sanitized) - len(input_tokens)}个)")
+                
+                # 最终内存清理
+                del generated_sequence, logits, next_token_logits
+                import gc
+                gc.collect()
+                
                 return sanitized
                 
         except Exception as e:
             print(f"❌ 装饰音生成失败: {e}")
             import traceback
             traceback.print_exc()
+            # 异常时也要清理内存
+            import gc
+            gc.collect()
             return None
     
     def decode_to_midi(self, tokens, output_path: str):
