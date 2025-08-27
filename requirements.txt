@@ -25,6 +25,7 @@ werkzeug>=2.0.0
 
 # Music Visualization
 music21>=7.0.0
+pretty_midi
 
 # Utilities
 pathlib
