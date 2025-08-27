@@ -65,6 +65,11 @@ def init_inference_engine():
 
 
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint for Render"""
+    return jsonify({'status': 'healthy', 'service': 'ornament-generator'}), 200
+
 @app.route('/')
 def index():
     """Home page"""
