@@ -1,1 +1,1 @@
-web: cd web && python start.py
+web: cd web && gunicorn -w 1 -b 0.0.0.0:$PORT app:app --timeout 180 --keep-alive 2 --max-requests 1000
