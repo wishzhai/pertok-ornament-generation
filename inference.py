@@ -144,10 +144,10 @@ class OrnamentInferenceEngine:
             print(f"   参数: temperature={temperature}, top_k={top_k}, top_p={top_p}")
             
             # 设置默认生成长度（限制为更小值以节省内存）
-             if max_new_tokens is None:
-                 max_new_tokens = min(20, self.model.max_seq_len - len(input_tokens))  # 进一步减少生成长度
-             else:
-                 max_new_tokens = min(max_new_tokens, 20)  # 强制限制最大生成长度为20
+            if max_new_tokens is None:
+                max_new_tokens = min(20, self.model.max_seq_len - len(input_tokens))  # 进一步减少生成长度
+            else:
+                max_new_tokens = min(max_new_tokens, 20)  # 强制限制最大生成长度为20
             
             # 初始化生成序列为输入tokens
             generated_sequence = input_tokens.copy()
