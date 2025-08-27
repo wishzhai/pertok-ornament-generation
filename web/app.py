@@ -145,11 +145,11 @@ def generate_ornaments():
         return jsonify({'error': 'No filename provided'}), 400
     
     # Create temporary inference engine
-    # 检查初始内存使用
+    # 检查初始内存使用（放宽阈值，因为使用模拟模型）
     initial_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
     print(f"🔍 初始内存使用: {initial_memory:.1f}MB")
     
-    if initial_memory > 480:  # 调整阈值，给更多空间
+    if initial_memory > 500:  # 500MB threshold (relaxed)
         return jsonify({'error': 'Server memory usage too high, please try again later'}), 503
     
     inference_engine = None
@@ -158,11 +158,11 @@ def generate_ornaments():
         if inference_engine is None:
             return jsonify({'error': 'Failed to create inference engine'}), 500
         
-        # 检查模型加载后的内存
+        # 检查模型加载后的内存（模拟模型应该很轻量）
         model_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
         print(f"🔍 模型加载后内存: {model_memory:.1f}MB")
         
-        if model_memory > 500:  # 调整阈值，给模型加载更多空间
+        if model_memory > 510:  # 510MB threshold (relaxed for mock model)
             return jsonify({'error': 'Memory usage too high after model loading'}), 503
         
         # Input and output paths
@@ -175,13 +175,13 @@ def generate_ornaments():
         if input_tokens is None:
             return jsonify({'error': 'Failed to encode MIDI'}), 500
         
-        # Generate ornaments with strict memory limits
+        # Generate ornaments with relaxed limits for mock model
         output_tokens = inference_engine.generate_ornaments(
             input_tokens, 
-            temperature=min(temperature, 0.7),  # 进一步限制温度
-            top_k=min(top_k, 10),  # 进一步限制top_k
-            top_p=min(top_p, 0.7),  # 进一步限制top_p
-            max_new_tokens=15  # 更严格限制生成长度
+            temperature=min(temperature, 0.8),  # 模拟模式下放宽温度
+            top_k=min(top_k, 20),  # 模拟模式下放宽top_k
+            top_p=min(top_p, 0.8),  # 模拟模式下放宽top_p
+            max_new_tokens=20  # 模拟模式下放宽生成长度
         )
         
         if output_tokens is None:
