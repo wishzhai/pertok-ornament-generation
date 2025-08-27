@@ -92,12 +92,31 @@ document.addEventListener('DOMContentLoaded', function() {
         const formData = new FormData();
         formData.append('file', file);
         
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
-        });
+        let response;
+        try {
+            response = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+        } catch (networkErr) {
+            throw new Error(`Network error while uploading: ${networkErr.message}`);
+        }
         
-        return await response.json();
+        const text = await response.text();
+        // Try to parse JSON safely, and provide useful error if not JSON
+        try {
+            const data = text ? JSON.parse(text) : {};
+            if (!response.ok) {
+                const msg = data.error || `${response.status} ${response.statusText}`;
+                throw new Error(`Upload failed: ${msg}`);
+            }
+            return data;
+        } catch (e) {
+            if (!response.ok) {
+                throw new Error(`Upload failed: ${response.status} ${response.statusText}. Body: ${text?.slice(0, 200) || 'empty response'}`);
+            }
+            throw new Error(`Upload returned non-JSON response. Body: ${text?.slice(0, 200) || 'empty response'}`);
+        }
     }
     
     /**
@@ -107,20 +126,38 @@ document.addEventListener('DOMContentLoaded', function() {
      * @returns {Promise<Object>} Generation result
      */
     async function generateOrnaments(filename, params) {
-        const response = await fetch('/generate', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                filename: filename,
-                temperature: params.temperature,
-                top_k: params.top_k,
-                top_p: params.top_p
-            })
-        });
+        let response;
+        try {
+            response = await fetch('/generate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    filename: filename,
+                    temperature: params.temperature,
+                    top_k: params.top_k,
+                    top_p: params.top_p
+                })
+            });
+        } catch (networkErr) {
+            throw new Error(`Network error while generating: ${networkErr.message}`);
+        }
         
-        return await response.json();
+        const text = await response.text();
+        try {
+            const data = text ? JSON.parse(text) : {};
+            if (!response.ok || !data.success) {
+                const backendMsg = data.error || `${response.status} ${response.statusText}`;
+                throw new Error(`Generation failed: ${backendMsg}`);
+            }
+            return data;
+        } catch (e) {
+            if (!response.ok) {
+                throw new Error(`Generation failed: ${response.status} ${response.statusText}. Body: ${text?.slice(0, 200) || 'empty response'}`);
+            }
+            throw new Error(`Generation returned non-JSON response. Body: ${text?.slice(0, 200) || 'empty response'}`);
+        }
     }
     
     /**
@@ -300,173 +337,87 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Clear canvas
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     
-                    // Draw time marker
-                    const timePosition = (currentTime / duration) * canvas.width;
-                    ctx.fillStyle = '#333';
-                    ctx.fillRect(timePosition, 0, 2, canvas.height);
+                    // Draw background grid
+                    ctx.fillStyle = '#f8f9fa';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.strokeStyle = '#e9ecef';
+                    ctx.lineWidth = 1;
+                    for (let i = 0; i < 16; i++) {
+                        const x = (i / 16) * canvas.width;
+                        ctx.beginPath();
+                        ctx.moveTo(x, 0);
+                        ctx.lineTo(x, canvas.height);
+                        ctx.stroke();
+                    }
                     
                     // Draw notes
-                    mockNotes.forEach(note => {
-                        const noteStart = (note.start / duration) * canvas.width;
-                        const noteEnd = (note.end / duration) * canvas.width;
-                        const noteWidth = noteEnd - noteStart;
+                    const lanes = 36;
+                    mockNotes.forEach((note, index) => {
+                        const x = (note.start / duration) * canvas.width;
+                        const w = (note.duration / duration) * canvas.width;
+                        const lane = Math.floor((note.pitch % lanes));
+                        const y = canvas.height - (lane + 1) * (canvas.height / lanes);
                         
-                        // Calculate vertical position (higher pitch = higher position)
-                        const noteHeight = 5;
-                        const noteY = canvas.height - (note.pitch - 21) * noteHeight;
-                        
-                        // Use consistent colors with the MusicXML display
-                        ctx.fillStyle = note.isOrnament ? '#9C27B0' : '#000000';
-                        
-                        // Draw note rectangle
-                        ctx.fillRect(noteStart, noteY, noteWidth, noteHeight);
+                        ctx.fillStyle = note.isOrnament ? '#8a2be2' : '#007bff';
+                        ctx.fillRect(x, y, Math.max(2, w), Math.max(4, canvas.height / lanes - 2));
                     });
                     
-                    // Continue animation if audio is playing
-                    if (!audioElement.paused) {
+                    // Draw playhead
+                    const playheadX = (currentTime / duration) * canvas.width;
+                    ctx.strokeStyle = '#dc3545';
+                    ctx.beginPath();
+                    ctx.moveTo(playheadX, 0);
+                    ctx.lineTo(playheadX, canvas.height);
+                    ctx.stroke();
+                    
+                    if (!audioElement.paused && !audioElement.ended) {
                         animationFrame = requestAnimationFrame(drawPianoRoll);
                     }
                 }
                 
-                // Start animation
-                animationFrame = requestAnimationFrame(drawPianoRoll);
-                
-                // Stop animation when audio ends or is paused
-                audioElement.addEventListener('pause', () => {
-                    cancelAnimationFrame(animationFrame);
+                // Start animation when audio plays
+                audioElement.addEventListener('play', () => {
+                    startTime = Date.now();
+                    drawPianoRoll();
                 });
                 
-                audioElement.addEventListener('ended', () => {
-                    cancelAnimationFrame(animationFrame);
-                });
+                // Stop animation when audio pauses or ends
+                function stop() {
+                    if (animationFrame) cancelAnimationFrame(animationFrame);
+                }
+                audioElement.addEventListener('pause', stop);
+                audioElement.addEventListener('ended', stop);
             })
-            .catch(error => {
-                console.error('Error loading MIDI file:', error);
-                container.innerHTML = '<div class="alert alert-warning">Failed to load MIDI visualization</div>';
+            .catch(err => {
+                console.error('Failed to visualize MIDI:', err);
             });
     }
     
-    /**
-     * Generate mock notes for visualization
-     * @param {boolean} includeOrnaments - Whether to include ornaments
-     * @returns {Array} Array of note objects
-     */
-    function generateMockNotes(includeOrnaments = false) {
+    // Mock note generator for visualization
+    function generateMockNotes(highlightOrnaments) {
         const notes = [];
-        const duration = 60; // 60 seconds total duration
-        
-        // Generate main notes (every 2 seconds)
-        for (let i = 0; i < 30; i++) {
-            const start = i * 2;
-            const end = start + 1.5;
-            const pitch = 60 + Math.floor(Math.random() * 24); // C4 to C6
-            
+        const totalNotes = 120;
+        for (let i = 0; i < totalNotes; i++) {
             notes.push({
-                start,
-                end,
-                pitch,
-                isOrnament: false
+                start: i * 0.5,
+                duration: 0.3 + Math.random() * 0.4,
+                pitch: 60 + Math.floor(Math.random() * 24),
+                isOrnament: highlightOrnaments && Math.random() < 0.2
             });
         }
-        
-        // Add ornaments if requested
-        if (includeOrnaments) {
-            for (let i = 0; i < 20; i++) {
-                const start = i * 3 + 0.5;
-                const end = start + 0.3;
-                const pitch = 72 + Math.floor(Math.random() * 12); // Higher pitches for ornaments
-                
-                notes.push({
-                    start,
-                    end,
-                    pitch,
-                    isOrnament: true
-                });
-            }
-        }
-        
         return notes;
     }
     
-    /**
-     * Display ornament analysis
-     * @param {Object} analysis - Analysis results
-     */
-    function displayAnalysis(analysis) {
-        const analysisContent = document.getElementById('analysis-content');
-        
-        if (!analysis) {
-            analysisContent.innerHTML = '<div class="alert alert-warning">No analysis data available</div>';
-            return;
-        }
-        
-        let html = '';
-        
-        // Ornament statistics
-        html += `
-            <div class="analysis-item">
-                <div class="analysis-title">Ornament Statistics</div>
-                <div class="row">
-                    <div class="col-md-6">
-                        <p>Original Notes: <strong>${analysis.original_notes || 0}</strong></p>
-                        <p>Ornament Notes: <strong class="ornament-note">${analysis.ornament_notes || 0}</strong></p>
-                    </div>
-                    <div class="col-md-6">
-                        <p>Ornament Density: <strong>${analysis.ornament_density ? (analysis.ornament_density * 100).toFixed(2) + '%' : '0%'}</strong></p>
-                        <p>Microtiming Adjustments: <strong>${analysis.microtiming_adjustments || 0}</strong></p>
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        // Ornament type distribution
-        if (analysis.ornament_types) {
-            html += `
-                <div class="analysis-item">
-                    <div class="analysis-title">Ornament Type Distribution</div>
-                    <div class="row">
-            `;
-            
-            for (const [type, count] of Object.entries(analysis.ornament_types)) {
-                html += `
-                    <div class="col-md-4 col-6">
-                        <p>${type}: <strong>${count}</strong></p>
-                    </div>
-                `;
-            }
-            
-            html += `
-                    </div>
-                </div>
-            `;
-        }
-        
-        analysisContent.innerHTML = html;
-    }
-    
-    /**
-     * Show alert message
-     * @param {string} message - Alert message
-     * @param {string} type - Alert type (success, danger, warning, info)
-     */
+    // Simple alert helper
     function showAlert(message, type = 'info') {
-        // Create alert element
-        const alertDiv = document.createElement('div');
-        alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
-        alertDiv.role = 'alert';
-        alertDiv.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        `;
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type}`;
+        alert.role = 'alert';
+        alert.textContent = message;
         
-        // Add to page
         const container = document.querySelector('.container');
-        container.insertBefore(alertDiv, container.firstChild);
+        container.insertBefore(alert, container.firstChild);
         
-        // Auto-close after 5 seconds
-        setTimeout(() => {
-            alertDiv.classList.remove('show');
-            setTimeout(() => alertDiv.remove(), 150);
-        }, 5000);
+        setTimeout(() => alert.remove(), 6000);
     }
 });
