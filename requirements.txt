@@ -32,3 +32,4 @@ music21>=7.0.0
 pathlib
 argparse
 typing-extensions
+psutil>=5.8.0

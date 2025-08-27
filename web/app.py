@@ -10,6 +10,7 @@ import sys
 import json
 import uuid
 import tempfile
+import psutil
 from pathlib import Path
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
@@ -64,6 +65,9 @@ def cleanup_inference_engine(engine):
     if engine is not None:
         # 清理模型
         if hasattr(engine, 'model') and engine.model is not None:
+            # 清理模型参数
+            for param in engine.model.parameters():
+                del param
             del engine.model
         # 清理其他组件
         if hasattr(engine, 'tokenizer'):
@@ -73,9 +77,14 @@ def cleanup_inference_engine(engine):
         if hasattr(engine, 'ornament_loss'):
             del engine.ornament_loss
         del engine
-        # 强制垃圾回收
+        # 强制垃圾回收（多次）
         import gc
-        gc.collect()
+        for _ in range(3):
+            gc.collect()
+        # 清理PyTorch缓存
+        import torch
+        if hasattr(torch.cuda, 'empty_cache'):
+            torch.cuda.empty_cache()
 
 
 
@@ -136,11 +145,25 @@ def generate_ornaments():
         return jsonify({'error': 'No filename provided'}), 400
     
     # Create temporary inference engine
+    # 检查初始内存使用
+    initial_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+    print(f"🔍 初始内存使用: {initial_memory:.1f}MB")
+    
+    if initial_memory > 400:  # 如果初始内存已经很高，拒绝请求
+        return jsonify({'error': 'Server memory usage too high, please try again later'}), 503
+    
     inference_engine = None
     try:
         inference_engine = create_inference_engine()
         if inference_engine is None:
             return jsonify({'error': 'Failed to create inference engine'}), 500
+        
+        # 检查模型加载后的内存
+        model_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+        print(f"🔍 模型加载后内存: {model_memory:.1f}MB")
+        
+        if model_memory > 450:  # 如果内存使用过高，提前退出
+            return jsonify({'error': 'Memory usage too high after model loading'}), 503
         
         # Input and output paths
         input_path = os.path.join(UPLOAD_FOLDER, filename)
@@ -152,12 +175,13 @@ def generate_ornaments():
         if input_tokens is None:
             return jsonify({'error': 'Failed to encode MIDI'}), 500
         
-        # Generate ornaments
+        # Generate ornaments with strict memory limits
         output_tokens = inference_engine.generate_ornaments(
             input_tokens, 
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p
+            temperature=min(temperature, 0.8),  # 限制温度以减少计算
+            top_k=min(top_k, 20),  # 限制top_k以减少内存使用
+            top_p=min(top_p, 0.8),  # 限制top_p
+            max_new_tokens=30  # 严格限制生成长度
         )
         
         if output_tokens is None:

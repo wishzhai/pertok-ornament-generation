@@ -30,9 +30,11 @@ class OrnamentInferenceEngine:
         """
         # 强制使用CPU以节省内存
         self.device = torch.device("cpu")
+        torch.set_num_threads(1)  # 限制CPU线程数以节省内存
         
         print(f"🚀 初始化装饰音生成引擎 (内存优化模式)")
         print(f"   设备: {self.device}")
+        print(f"🔧 强制使用CPU设备进行推理，限制线程数为1")
         self.allow_fallback = allow_fallback
         
         # 初始化tokenizer和解码器
@@ -84,9 +86,17 @@ class OrnamentInferenceEngine:
             model = model.half()
             model.eval()
             
+            # 冻结所有参数以节省内存
+            for param in model.parameters():
+                param.requires_grad = False
+            
             # 清理checkpoint以释放内存
             del checkpoint
+            import gc
+            gc.collect()
             torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            
+            print(f"🔧 模型已转换为半精度并冻结参数")
             
             print(f"✅ 模型加载成功:")
             print(f"   词汇表大小: {vocab_size}")
@@ -133,9 +143,11 @@ class OrnamentInferenceEngine:
             print(f"   输入长度: {len(input_tokens)}")
             print(f"   参数: temperature={temperature}, top_k={top_k}, top_p={top_p}")
             
-            # 设置生成长度
+            # 设置生成长度（限制为更小值以节省内存）
             if max_new_tokens is None:
-                max_new_tokens = min(len(input_tokens) * 2, self.model.max_seq_len - len(input_tokens))
+                max_new_tokens = min(50, self.model.max_seq_len - len(input_tokens))  # 减少生成长度
+            else:
+                max_new_tokens = min(max_new_tokens, 50)  # 强制限制最大生成长度
             
             # 初始化生成序列为输入tokens
             generated_sequence = input_tokens.copy()
@@ -161,10 +173,13 @@ class OrnamentInferenceEngine:
                     # 立即清理输入tensor以节省内存
                     del input_tensor
                     
-                    # 每10步进行一次垃圾回收
-                    if step % 10 == 0:
+                    # 每5步进行一次垃圾回收（更频繁）
+                    if step % 5 == 0:
                         import gc
                         gc.collect()
+                        # 清理PyTorch缓存
+                        if hasattr(torch.cuda, 'empty_cache'):
+                            torch.cuda.empty_cache()
                     
                     # 获取最后一个位置的logits用于生成下一个token
                     next_token_logits = logits[0, -1, :]  # [vocab_size]
