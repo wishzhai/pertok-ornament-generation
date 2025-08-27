@@ -1,1 +1,1 @@
-web: cd web && gunicorn -w 1 -b 0.0.0.0:$PORT app:app --timeout 300 --keep-alive 2
+web: gunicorn -w 1 -b 0.0.0.0:$PORT app:app --timeout 600 --keep-alive 5 --max-requests 100 --worker-class sync --worker-tmp-dir /dev/shm --preload
