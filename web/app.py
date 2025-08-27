@@ -40,10 +40,9 @@ os.makedirs(SCORE_FOLDER, exist_ok=True)
 # 允许的文件扩展名
 ALLOWED_EXTENSIONS = {'mid', 'midi'}
 
-# 全局变量
+# 模型路径
 model_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
                          'checkpoints_ornament_aware', 'best_ornament_aware_model.pth')
-inference_engine = None
 
 
 def allowed_file(filename):
@@ -51,17 +50,13 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def init_inference_engine():
-    """Initialize inference engine"""
-    global inference_engine
-    if inference_engine is None:
-        try:
-            inference_engine = OrnamentInferenceEngine(model_path, device="auto")
-            return True
-        except Exception as e:
-            print(f"Failed to initialize inference engine: {e}")
-            return False
-    return True
+def create_inference_engine():
+    """Create a temporary inference engine instance"""
+    try:
+        return OrnamentInferenceEngine(model_path, device="auto")
+    except Exception as e:
+        print(f"Failed to create inference engine: {e}")
+        return None
 
 
 
@@ -121,9 +116,10 @@ def generate_ornaments():
     if not filename:
         return jsonify({'error': 'No filename provided'}), 400
     
-    # Initialize inference engine
-    if not init_inference_engine():
-        return jsonify({'error': 'Failed to initialize inference engine'}), 500
+    # Create temporary inference engine
+    inference_engine = create_inference_engine()
+    if inference_engine is None:
+        return jsonify({'error': 'Failed to create inference engine'}), 500
     
     try:
         # Input and output paths
@@ -181,6 +177,13 @@ def generate_ornaments():
         
     except Exception as e:
         return jsonify({'error': f'Processing failed: {str(e)}'}), 500
+    finally:
+        # Explicitly delete inference engine to free memory
+        if 'inference_engine' in locals():
+            del inference_engine
+            # Force garbage collection
+            import gc
+            gc.collect()
 
 
 

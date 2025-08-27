@@ -78,9 +78,26 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Reset current filename when selecting a new file
+    // Custom file upload button functionality
+    const fileSelectBtn = document.getElementById('file-select-btn');
+    const fileName = document.getElementById('file-name');
+    
+    fileSelectBtn.addEventListener('click', function() {
+        midiFileInput.click();
+    });
+    
+    // Reset current filename when selecting a new file and update display
     midiFileInput.addEventListener('change', function() {
         currentFilename = null;
+        if (this.files && this.files.length > 0) {
+            fileName.textContent = this.files[0].name;
+            fileName.classList.remove('text-muted');
+            fileName.classList.add('text-success');
+        } else {
+            fileName.textContent = 'No file selected';
+            fileName.classList.remove('text-success');
+            fileName.classList.add('text-muted');
+        }
     });
     
     /**
