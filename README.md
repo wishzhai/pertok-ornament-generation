@@ -294,13 +294,7 @@ print("Category counts:", dict(cat_counts))
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{yourname2024ornament,
-  title={Leveraging PerTok and Domain-Specific Transformer Design for Expressive MIDI Ornament Generation},
-  author={Your Name},
-  journal={Your Journal},
-  year={2024},
-  note={Code available at: https://github.com/yourusername/ornament-generation}
-}
+
 ```
 
 ## 📄 License
