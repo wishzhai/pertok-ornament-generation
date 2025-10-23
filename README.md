@@ -294,7 +294,12 @@ print("Category counts:", dict(cat_counts))
 If you use this code in your research, please cite:
 
 ```bibtex
-
+@inproceedings{zhai2025leveraging,
+  title={Leveraging PerTok and Domain-Specific Transformer Design for Expressive MIDI Ornament Generation},
+  author={Zhai, Weixi},
+  booktitle={Ismir 2025 Hybrid Conference},
+  year={2025}
+}
 ```
 
 ## 📄 License
